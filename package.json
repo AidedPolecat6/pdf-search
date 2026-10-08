@@ -1,0 +1,79 @@
+{
+  "name": "ok-pdf",
+  "version": "0.1.0",
+  "description": "PDF Search - offline dokumentsøgning i danske lovtekster og standarder",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "prepare-assets": "node scripts/prepare-assets.mjs",
+    "predev": "npm run prepare-assets",
+    "dev": "electron-vite dev",
+    "prebuild": "npm run prepare-assets",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "export:truths": "node scripts/export-truths.mjs",
+    "package": "npm run build && electron-builder --win nsis",
+    "package:portable": "npm run build && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "dk.okpdf.app",
+    "productName": "PDF Search",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "data",
+        "to": "data",
+        "filter": ["*.xlsx", "*.csv"]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/pdfjs-dist/**/*",
+      "node_modules/tesseract.js/**/*",
+      "node_modules/tesseract.js-core/**/*",
+      "node_modules/@tesseract.js-data/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version}.${ext}"
+    }
+  },
+  "dependencies": {
+    "@tesseract.js-data/dan": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "exceljs": "^4.4.0",
+    "minisearch": "^7.2.0",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

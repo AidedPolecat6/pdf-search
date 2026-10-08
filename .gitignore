@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+coverage/
+src/renderer/public/ocr/
+PDF Search Data/
+*.traineddata
+*.[pP][dD][fF]
+*.xlsx
+!data/*.xlsx
+~$*
+.env
+.env.*
+!.env.example
+*.log
