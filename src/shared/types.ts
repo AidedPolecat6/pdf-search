@@ -53,6 +53,7 @@ export interface PdfTextPosition {
   width: number
   height: number
   transform: number[]
+  fontName: string
 }
 
 export interface TruthRecord {
@@ -69,6 +70,19 @@ export interface TruthRecord {
 export interface TruthSet {
   sourcePath: string | null
   records: TruthRecord[]
+  warnings: string[]
+}
+
+export interface OverviewEntry {
+  document: string
+  label: string
+  title: string
+  physicalPage: number | null
+}
+
+export interface OverviewSet {
+  sourcePath: string | null
+  entries: OverviewEntry[]
   warnings: string[]
 }
 

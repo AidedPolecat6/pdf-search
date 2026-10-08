@@ -110,4 +110,15 @@ describe('DocumentSearch', () => {
     expect(results[0].physicalPage).toBe(802)
     expect(results[0].provision).toBe('722.443.4')
   })
+
+  it('uses local chapter overview titles as searchable metadata', () => {
+    const engine = new DocumentSearch([
+      fragment({ id: 'general', documentName: 'DS-HD 60364.pdf', documentPath: 'DS-HD 60364.pdf', physicalPage: 100, provision: '6.1', text: 'Generelle krav til verifikation.' }),
+      fragment({ id: 'special', documentName: 'DS-HD 60364.pdf', documentPath: 'DS-HD 60364.pdf', physicalPage: 200, provision: '999.1', text: 'Særlige installationer og områder.' })
+    ], [], [
+      { document: 'DS/HD 60364', label: 'Del 7-999', title: 'Prøveanlæg specialområde', physicalPage: 200 }
+    ])
+
+    expect(engine.search('prøveanlæg')[0].id).toBe('special')
+  })
 })

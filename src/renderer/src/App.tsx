@@ -125,9 +125,10 @@ export default function App(): React.JSX.Element {
     if (!window.okPdf) return
     const reusable = previous?.folder === selected ? previous : null
     setActivity({ message: 'Kontrollerer dokumentmappe' })
-    const [scanned, truthSet] = await Promise.all([
-      window.okPdf.scanFolder(selected, reusable?.files),
-      window.okPdf.loadTruths(selected)
+    const scanned = await window.okPdf.scanFolder(selected, reusable?.files)
+    const [truthSet, overview] = await Promise.all([
+      window.okPdf.loadTruths(selected),
+      window.okPdf.loadOverview(selected)
     ])
     setFolder(selected)
     setFiles(scanned)
@@ -156,7 +157,7 @@ export default function App(): React.JSX.Element {
     setIndex(next)
     setActivity({ message: 'Klargør søgning' })
     await yieldToUi()
-    const engine = new DocumentSearch(next.fragments, truthSet.records)
+    const engine = new DocumentSearch(next.fragments, truthSet.records, overview.entries)
     setSearch(engine)
     setResults([])
     await benchmarkInSteps(engine, truthSet)

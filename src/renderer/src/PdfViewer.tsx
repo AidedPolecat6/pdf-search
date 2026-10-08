@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { GlobalWorkerOptions, getDocument, Util, type PDFDocumentProxy } from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { locateHighlight } from '../../shared/highlights'
+import { containsVisibleInk, locateHighlight } from '../../shared/highlights'
 import type { TextSource } from '../../shared/types'
 
 GlobalWorkerOptions.workerSrc = pdfWorker
@@ -21,7 +21,7 @@ interface HighlightBox {
   top: number
   width: number
   height: number
-  kind: 'query' | 'synonym'
+  kind: 'query' | 'synonym' | 'provision'
 }
 
 interface PdfTextItem {
@@ -29,6 +29,7 @@ interface PdfTextItem {
   width: number
   height: number
   transform: number[]
+  fontName: string
 }
 
 function mergeLineBoxes(boxes: HighlightBox[]): HighlightBox[] {
@@ -52,6 +53,29 @@ function mergeLineBoxes(boxes: HighlightBox[]): HighlightBox[] {
   return merged
 }
 
+function boxContainsVisibleInk(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, box: HighlightBox): boolean {
+  const scaleX = canvas.width / Math.max(1, canvas.getBoundingClientRect().width)
+  const scaleY = canvas.height / Math.max(1, canvas.getBoundingClientRect().height)
+  const left = Math.max(0, Math.floor(box.left * scaleX))
+  const top = Math.max(0, Math.floor(box.top * scaleY))
+  const width = Math.min(canvas.width - left, Math.max(1, Math.ceil(box.width * scaleX)))
+  const height = Math.min(canvas.height - top, Math.max(1, Math.ceil(box.height * scaleY)))
+  if (width <= 0 || height <= 0) return false
+  const pixels = context.getImageData(left, top, width, height)
+  return containsVisibleInk(pixels.data, pixels.width, pixels.height)
+}
+
+function highlightStatus(kinds: HighlightBox['kind'][], source: TextSource): string {
+  const labels = [
+    kinds.includes('provision') ? 'Henvisning' : '',
+    kinds.includes('query') ? 'søgeord' : '',
+    kinds.includes('synonym') ? 'synonymer' : ''
+  ].filter(Boolean)
+  if (!labels.length) return source === 'ocr' ? 'OCR-side uden præcis markering' : 'Markering ikke fundet'
+  if (labels.length === 1) return `${labels[0]} markeret`
+  return `${labels.slice(0, -1).join(', ')} og ${labels.at(-1)} markeret`
+}
+
 export function PdfViewer({ path, title, initialPage, provision, query, source, onClose }: PdfViewerProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -62,9 +86,9 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
   const [error, setError] = useState<string | null>(null)
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 })
   const [highlights, setHighlights] = useState<HighlightBox[]>([])
-  const [highlightKind, setHighlightKind] = useState<'query' | 'synonym' | 'mixed' | 'none'>('none')
+  const [highlightKinds, setHighlightKinds] = useState<HighlightBox['kind'][]>([])
   const [showHighlights, setShowHighlights] = useState(true)
-  const [highlightDiagnostics, setHighlightDiagnostics] = useState({ items: 0, selected: 0, anchor: false })
+  const [highlightDiagnostics, setHighlightDiagnostics] = useState({ items: 0, selected: 0, anchor: false, provision: false, hiddenFonts: '' })
 
   useEffect(() => {
     let active = true
@@ -96,8 +120,8 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
       await pdfPage.render({ canvasContext: context, viewport: renderViewport, canvas }).promise
 
       if (textItems) {
-        const selection = locateHighlight(textItems, query)
-        const boxes = selection.matches.map((match) => {
+        const selection = locateHighlight(textItems, query, provision)
+        const boxFor = (match: { index: number; start: number; end: number; kind: HighlightBox['kind'] }): HighlightBox => {
           const item = textItems[match.index]
           const transform = Util.transform(cssViewport.transform, item.transform)
           const height = Math.max(8, Math.hypot(transform[2], transform[3]), item.height * zoom)
@@ -109,19 +133,37 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
             height: height + 3,
             kind: match.kind
           }
+        }
+        const fontVisibility = new Map<string, { visible: number; total: number }>()
+        textItems.forEach((item, index) => {
+          if (!item.str.trim()) return
+          const stats = fontVisibility.get(item.fontName) ?? { visible: 0, total: 0 }
+          stats.total += 1
+          if (boxContainsVisibleInk(context, canvas, boxFor({ index, start: 0, end: item.str.length, kind: 'query' }))) stats.visible += 1
+          fontVisibility.set(item.fontName, stats)
         })
+        // PDF.js exposes clipped translation layers as ordinary text; reject fonts whose geometry is not consistently visible.
+        const hiddenFonts = new Set(Array.from(fontVisibility)
+          .filter(([, stats]) => stats.total >= 8 && stats.total - stats.visible >= 2 && stats.visible / stats.total < 0.9)
+          .map(([fontName]) => fontName))
+        const boxes = selection.matches
+          .filter((match) => !hiddenFonts.has(textItems[match.index].fontName))
+          .map(boxFor)
+          .filter((box) => boxContainsVisibleInk(context, canvas, box))
         if (!cancelled) {
           setHighlights(mergeLineBoxes(boxes))
-          setHighlightKind(selection.kind)
+          setHighlightKinds(Array.from(new Set(boxes.map((box) => box.kind))))
           setHighlightDiagnostics({
             items: textItems.length,
-            selected: selection.matches.length,
-            anchor: selection.matches.some((match) => match.kind === 'query')
+            selected: boxes.length,
+            anchor: boxes.some((box) => box.kind === 'query'),
+            provision: boxes.some((box) => box.kind === 'provision'),
+            hiddenFonts: Array.from(hiddenFonts).join(',')
           })
         }
       } else if (!cancelled) {
         setHighlights([])
-        setHighlightKind('none')
+        setHighlightKinds([])
       }
       pdfPage.cleanup()
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Siden kunne ikke vises.'))
@@ -134,7 +176,7 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
     if (!showHighlights || !highlights.length || !stageRef.current || !surfaceRef.current) return
     const stage = stageRef.current
     const surface = surfaceRef.current
-    const first = highlights[0]
+    const first = highlights.find((highlight) => highlight.kind === 'provision') ?? highlights[0]
     requestAnimationFrame(() => {
       stage.scrollTo({
         top: Math.max(0, surface.offsetTop + first.top - stage.clientHeight * 0.3),
@@ -172,12 +214,14 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
         </div>
         {page === initialPage && (
           <div
-            className={`highlight-status highlight-status-${highlightKind}`}
+            className={`highlight-status ${highlightKinds.length ? 'highlight-status-terms' : 'highlight-status-none'}`}
             data-text-items={highlightDiagnostics.items}
             data-selected-items={highlightDiagnostics.selected}
             data-anchor-found={highlightDiagnostics.anchor}
+            data-provision-found={highlightDiagnostics.provision}
+            data-hidden-fonts={highlightDiagnostics.hiddenFonts}
           >
-            {highlightKind === 'mixed' ? 'Søgeord og synonymer markeret' : highlightKind === 'query' ? 'Søgeord markeret' : highlightKind === 'synonym' ? 'Synonymer markeret' : source === 'ocr' ? 'OCR-side uden præcis markering' : 'Markering ikke fundet'}
+            {highlightStatus(highlightKinds, source)}
           </div>
         )}
         <div className="viewer-controls">
@@ -188,6 +232,7 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
           {Boolean(highlights.length) && (
             <>
               <div className="highlight-legend" aria-label="Markeringsfarver">
+                <span><i className="highlight-legend-provision" />Henvisning</span>
                 <span><i className="highlight-legend-query" />Dine søgeord</span>
                 <span><i className="highlight-legend-synonym" />Synonymer</span>
               </div>

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import ExcelJS from 'exceljs'
 import type { TruthRecord, TruthSet } from '../shared/types'
 
-function cellText(value: ExcelJS.CellValue): string {
+export function cellText(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'object') {
     if ('text' in value) return String(value.text)

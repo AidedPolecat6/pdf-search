@@ -4,6 +4,15 @@
 
 ![PDF Search i fuldskærm med søgeresultater og PDF-fremviser](docs/pdf-search-fullscreen.png)
 
+## Download
+
+Hent den nyeste version under [GitHub Releases](https://github.com/AidedPolecat6/pdf-search/releases/latest):
+
+- `PDF Search Setup` installerer programmet i Windows.
+- `PDF Search Portable` kan startes direkte uden installation.
+
+Programmet er endnu ikke signeret med et kommercielt Windows-certifikat. Windows SmartScreen kan derfor vise en advarsel ved første start. Kontrollér, at filen er hentet fra dette repositorys officielle release-side.
+
 ## Kom hurtigt i gang
 
 1. Start `PDF Search.exe`, eller installer programmet med `PDF Search Setup`.
@@ -35,8 +44,11 @@ Hvis søgningen indeholder flere citerede fraser, skal alle fraser forekomme i d
 
 ### Markeringsfarver
 
+- **Lilla:** den bestemmelse, paragraf, stykke eller det nummer, som resultatet henviser til.
 - **Gul:** ord og fraser, du selv har skrevet.
 - **Blå:** faglige synonymer, som programmet har fundet i PDF'en.
+
+Markeringer fra usynlige eller beskårne tekstlag i PDF-filen filtreres fra. Fremviseren ruller først til den lilla henvisning, når den kan findes præcist.
 
 ## Dokumentoversigten
 
@@ -103,6 +115,12 @@ En fil med navnet `Sandheder*.xlsx` i den valgte PDF-mappe fungerer som lokal ov
 
 > **PDF-filer må aldrig tilføjes til repositoryet.** Brugeren vælger selv sin lokale dokumentmappe. `.gitignore` blokerer PDF-filer som ekstra sikkerhed.
 
+## Lokal lovoversigt
+
+Hvis `Oversigt lovgivning PM.xlsx` ligger i den valgte PDF-mappe, indlæser programmet automatisk arkets kapitelnavne, emner og PDF-sidetal som ekstra lokal søgemetadata. Oplysningerne hjælper søgerangeringen, men kopieres ikke til søgeindekset eller den pakkede app.
+
+Filen er lokal og ignoreres altid af Git. Programmet fungerer fortsat normalt, hvis filen ikke findes.
+
 ## Portable version
 
 `PDF Search Portable` kræver ingen installation. Placér den portable `.exe` i en mappe, hvor du har skriverettigheder, og start den direkte.
@@ -148,3 +166,9 @@ npm run package:portable
 - `npm run export:truths` opdaterer CSV-kopien af sandhedssættet.
 
 Repositoryet indeholder kildekode, ikon og sandhedssæt, men ingen PDF-dokumenter eller lokale søgeindeks.
+
+## Licens
+
+PDF Search er fri software under [GNU General Public License version 3](LICENSE), kun denne version (`GPL-3.0-only`). Copyright © 2026 AidedPolecat6.
+
+Tredjepartskomponenter beholder deres egne kompatible licenser. Se [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licensen omfatter ikke brugerens PDF-filer eller tredjepartsstandarder.

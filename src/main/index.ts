@@ -4,9 +4,11 @@ import { extname, join, normalize, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import type { PdfFile, PdfTextPosition, StoredIndex } from '../shared/types'
+import { loadOverview } from './overview'
 import { loadTruthSet } from './truths'
 
 const allowedPdfPaths = new Set<string>()
+let allowedPdfFolder: string | null = null
 
 if (process.env.PORTABLE_EXECUTABLE_DIR) {
   app.setPath('userData', join(process.env.PORTABLE_EXECUTABLE_DIR, 'PDF Search Data'))
@@ -42,9 +44,16 @@ async function scanFolder(folder: string, knownFiles: PdfFile[] = []): Promise<P
     .sort((left, right) => left.localeCompare(right, 'da'))
 
   const files = await Promise.all(paths.map((path) => describePdf(path, knownByPath.get(path))))
+  allowedPdfFolder = absoluteFolder
   allowedPdfPaths.clear()
   files.forEach((file) => allowedPdfPaths.add(normalize(file.path)))
   return files
+}
+
+function assertAllowedFolder(folder: string): string {
+  const absoluteFolder = resolve(folder)
+  if (absoluteFolder !== allowedPdfFolder) throw new Error('Dokumentmappen er ikke godkendt.')
+  return absoluteFolder
 }
 
 function assertAllowedPdf(path: string): string {
@@ -95,9 +104,10 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('folder:scan', (_event, folder: string, knownFiles?: PdfFile[]) => scanFolder(folder, knownFiles))
   ipcMain.handle('truths:load', (_event, folder: string) => loadTruthSet(
-    resolve(folder),
+    assertAllowedFolder(folder),
     app.isPackaged ? join(process.resourcesPath, 'data') : resolve('data')
   ))
+  ipcMain.handle('overview:load', (_event, folder: string) => loadOverview(assertAllowedFolder(folder)))
   ipcMain.handle('pdf:read', async (_event, path: string) => {
     const bytes = await readFile(assertAllowedPdf(path))
     return new Uint8Array(bytes)
@@ -111,7 +121,8 @@ app.whenReady().then(() => {
       str: item.str,
       width: item.width,
       height: item.height,
-      transform: Array.from(item.transform)
+      transform: Array.from(item.transform),
+      fontName: item.fontName
     }] : [])
     await pdf.cleanup()
     return items

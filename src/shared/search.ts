@@ -1,6 +1,6 @@
 import MiniSearch from 'minisearch'
 import { normalizeTerm, parseQuery, phraseText, queryTerms } from './normalize'
-import type { BenchmarkResult, IndexedFragment, SearchResult, TruthRecord } from './types'
+import type { BenchmarkResult, IndexedFragment, OverviewEntry, SearchResult, TruthRecord } from './types'
 
 interface DomainConcept {
   id: string
@@ -142,20 +142,52 @@ function matchesAlternative(haystack: string, alternative: string): boolean {
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'u').test(haystack)
 }
 
+function overviewByFragment(fragments: IndexedFragment[], entries: OverviewEntry[]): Map<string, string> {
+  const result = new Map<string, string>()
+  const documents = new Map<string, IndexedFragment[]>()
+  for (const fragment of fragments) {
+    const key = normalizeDocument(fragment.documentName)
+    documents.set(key, [...(documents.get(key) ?? []), fragment])
+  }
+
+  for (const [document, documentFragments] of documents) {
+    const matching = entries.filter((entry) => {
+      const overviewDocument = normalizeDocument(entry.document)
+      return document.includes(overviewDocument) || overviewDocument.includes(document)
+    })
+    if (!matching.length) continue
+    const firstPage = Math.min(...documentFragments.map((fragment) => fragment.physicalPage))
+    const sections = matching.flatMap((entry, index) => {
+      const label = phraseText(entry.label)
+      const inferredPage = documentFragments.find((fragment) => phraseText(fragment.text).includes(label))?.physicalPage
+      const startPage = entry.physicalPage ?? inferredPage ?? (index === 0 ? firstPage : null)
+      return startPage === null ? [] : [{ ...entry, startPage }]
+    }).sort((left, right) => left.startPage - right.startPage)
+
+    for (const fragment of documentFragments) {
+      const section = sections.filter((entry) => entry.startPage <= fragment.physicalPage).at(-1)
+      if (section) result.set(fragment.id, `${section.label} ${section.title}`)
+    }
+  }
+  return result
+}
+
 export class DocumentSearch {
   private readonly fragments = new Map<string, IndexedFragment>()
+  private readonly overviews = new Map<string, string>()
   private readonly truths: TruthRecord[]
   private readonly engine = new MiniSearch({
     idField: 'id',
-    fields: ['text', 'provision', 'documentName'],
+    fields: ['text', 'provision', 'documentName', 'overview'],
     storeFields: ['id'],
     processTerm: (term) => normalizeTerm(term)
   })
 
-  constructor(fragments: IndexedFragment[], truths: TruthRecord[] = []) {
+  constructor(fragments: IndexedFragment[], truths: TruthRecord[] = [], overview: OverviewEntry[] = []) {
     this.truths = truths
+    this.overviews = overviewByFragment(fragments, overview)
     fragments.forEach((fragment) => this.fragments.set(fragment.id, fragment))
-    this.engine.addAll(fragments)
+    this.engine.addAll(fragments.map((fragment) => ({ ...fragment, overview: this.overviews.get(fragment.id) ?? '' })))
   }
 
   private truthDocumentIsEnabled(truth: TruthRecord, enabledDocumentPaths?: ReadonlySet<string>): boolean {
@@ -192,7 +224,7 @@ export class DocumentSearch {
       prefix: (term) => term.length >= 5,
       fuzzy: (term) => term.length >= 7 ? 0.16 : false,
       combineWith: 'OR',
-      boost: { provision: 2.4, documentName: 1.3, text: 1 }
+      boost: { provision: 2.4, overview: 1.6, documentName: 1.3, text: 1 }
     }).filter((match) => {
       const fragment = this.fragments.get(String(match.id))
       if (!fragment || (enabledDocumentPaths && !enabledDocumentPaths.has(fragment.documentPath))) return false
@@ -204,7 +236,7 @@ export class DocumentSearch {
     const topScore = raw[0].score
     const ranked = raw.map((match) => {
       const fragment = this.fragments.get(String(match.id))!
-      const haystack = `${fragment.provision} ${fragment.text}`.toLocaleLowerCase('da-DK')
+      const haystack = `${fragment.provision} ${fragment.text} ${this.overviews.get(fragment.id) ?? ''}`.toLocaleLowerCase('da-DK')
       const matchedConcepts = concepts.filter((concept) =>
         concept.alternatives.some((alternative) => matchesAlternative(haystack, alternative))
       ).length

@@ -2,6 +2,8 @@
   "name": "ok-pdf",
   "version": "0.1.0",
   "description": "PDF Search - offline dokumentsøgning i danske lovtekster og standarder",
+  "author": "AidedPolecat6",
+  "license": "GPL-3.0-only",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -30,8 +32,10 @@
       {
         "from": "data",
         "to": "data",
-        "filter": ["*.xlsx", "*.csv"]
-      }
+        "filter": ["Sandheder*.xlsx", "Sandheder*.csv"]
+      },
+      { "from": "LICENSE", "to": "LICENSE" },
+      { "from": "THIRD_PARTY_NOTICES.md", "to": "THIRD_PARTY_NOTICES.md" }
     ],
     "asarUnpack": [
       "node_modules/pdfjs-dist/**/*",
@@ -45,7 +49,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "license": "LICENSE"
     },
     "portable": {
       "artifactName": "${productName} Portable ${version}.${ext}"

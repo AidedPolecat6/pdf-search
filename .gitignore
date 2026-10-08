@@ -8,6 +8,7 @@ PDF Search Data/
 *.[pP][dD][fF]
 *.xlsx
 !data/*.xlsx
+Oversigt lovgivning PM.xlsx
 ~$*
 .env
 .env.*

@@ -1,8 +1,13 @@
 import { spawn } from 'node:child_process'
+import { access, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const port = 9333
 const executable = resolve('dist/win-unpacked/PDF Search.exe')
+const resources = resolve('dist/win-unpacked/resources')
+const bundledData = await readdir(resolve(resources, 'data'))
+if (bundledData.some((file) => /oversigt/i.test(file))) throw new Error('Den lokale lovoversigt blev fejlagtigt pakket med appen.')
+await Promise.all([access(resolve(resources, 'LICENSE')), access(resolve(resources, 'THIRD_PARTY_NOTICES.md'))])
 const child = spawn(executable, [`--remote-debugging-port=${port}`], { stdio: 'ignore' })
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
@@ -161,7 +166,8 @@ try {
           return status ? {
             items: status.dataset.textItems,
             selected: status.dataset.selectedItems,
-            anchor: status.dataset.anchorFound
+            anchor: status.dataset.anchorFound,
+            hiddenFonts: status.dataset.hiddenFonts
           } : null;
         })()
       }))()`,
@@ -221,7 +227,81 @@ try {
     returnByValue: true
   })
   if (!contextMenu.result.value?.includes('favoritter')) throw new Error('Favoritmenuen blev ikke vist ved højreklik.')
-  console.log(JSON.stringify({ ...value, firstResult, viewer, truthSummary, keyboard: closedViewer.result.value }))
+  await cdp(page.webSocketDebuggerUrl, 'Runtime.evaluate', {
+    expression: `(() => {
+      document.body.click();
+      const input = document.querySelector('input[aria-label="Søgetekst"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'spd selektivitet');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`
+  })
+  await delay(250)
+  await cdp(page.webSocketDebuggerUrl, 'Runtime.evaluate', {
+    expression: `document.querySelector('.search-button').click()`
+  })
+  await delay(500)
+  const openedGhostPage = await cdp(page.webSocketDebuggerUrl, 'Runtime.evaluate', {
+    expression: `(() => {
+      const card = [...document.querySelectorAll('.result-card')].find((result) => result.querySelector('.result-meta')?.textContent.includes('361'));
+      card?.querySelector('.open-button').click();
+      return card?.querySelector('.result-meta')?.textContent ?? null;
+    })()`,
+    returnByValue: true
+  })
+  if (!openedGhostPage.result.value?.includes('534.4.5.3')) throw new Error(`Ghost-testens side blev ikke fundet: ${openedGhostPage.result.value}`)
+  let ghostCheck
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await delay(500)
+    const result = await cdp(page.webSocketDebuggerUrl, 'Runtime.evaluate', {
+      expression: `(() => {
+        const canvas = document.querySelector('.pdf-page-surface canvas');
+        const surface = document.querySelector('.pdf-page-surface');
+        const boxes = [...document.querySelectorAll('.pdf-highlight-box')];
+        if (!canvas || !surface || !boxes.length) return null;
+        const context = canvas.getContext('2d');
+        const surfaceRect = surface.getBoundingClientRect();
+        const scaleX = canvas.width / canvas.getBoundingClientRect().width;
+        const scaleY = canvas.height / canvas.getBoundingClientRect().height;
+        const hasInk = (box) => {
+          const rect = box.getBoundingClientRect();
+          const left = Math.max(0, Math.floor((rect.left - surfaceRect.left) * scaleX));
+          const top = Math.max(0, Math.floor((rect.top - surfaceRect.top) * scaleY));
+          const width = Math.min(canvas.width - left, Math.max(1, Math.ceil(rect.width * scaleX)));
+          const height = Math.min(canvas.height - top, Math.max(1, Math.ceil(rect.height * scaleY)));
+          const pixels = context.getImageData(left, top, width, height).data;
+          const colors = new Map();
+          for (let offset = 0; offset < pixels.length; offset += 4) {
+            const color = (pixels[offset] >> 4) << 8 | (pixels[offset + 1] >> 4) << 4 | pixels[offset + 2] >> 4;
+            colors.set(color, (colors.get(color) ?? 0) + 1);
+          }
+          const dominant = [...colors].sort((left, right) => right[1] - left[1])[0][0];
+          const background = [dominant >> 8, dominant >> 4 & 15, dominant & 15].map((channel) => channel * 16 + 7);
+          let contrasting = 0;
+          for (let offset = 0; offset < pixels.length; offset += 4) {
+            if (Math.max(Math.abs(pixels[offset] - background[0]), Math.abs(pixels[offset + 1] - background[1]), Math.abs(pixels[offset + 2] - background[2])) >= 32) contrasting += 1;
+          }
+          return contrasting >= Math.max(2, Math.ceil(width * height * 0.005));
+        };
+        return {
+          boxes: boxes.length,
+          ghosts: boxes.filter((box) => !hasInk(box)).length,
+          provisions: document.querySelectorAll('.pdf-highlight-provision').length,
+          status: document.querySelector('.highlight-status')?.textContent,
+          hiddenFonts: document.querySelector('.highlight-status')?.dataset.hiddenFonts
+        };
+      })()`,
+      returnByValue: true
+    })
+    ghostCheck = result.result.value
+    if (ghostCheck) break
+  }
+  if (!ghostCheck || ghostCheck.ghosts !== 0 || ghostCheck.provisions < 1 || !ghostCheck.status?.includes('Henvisning') || !ghostCheck.hiddenFonts) {
+    throw new Error(`Usynlige eller manglende henvisningsmarkeringer: ${JSON.stringify(ghostCheck)}`)
+  }
+  await cdp(page.webSocketDebuggerUrl, 'Runtime.evaluate', {
+    expression: `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`
+  })
+  console.log(JSON.stringify({ ...value, firstResult, viewer, truthSummary, keyboard: closedViewer.result.value, ghostCheck }))
 
   const version = await fetchJson('/json/version')
   try {
