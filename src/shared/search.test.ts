@@ -102,6 +102,24 @@ describe('DocumentSearch', () => {
     expect(results[0].provision).toBe('§ 74, stk. 1, nr. 3')
   })
 
+  it('does not boost a truth that only shares generic cable terms', () => {
+    const search = new DocumentSearch([
+      fragment({ id: 'multiple-circuits', physicalPage: 265, provision: '521.7', text: 'Flere strømkredse må fremføres i samme kabel, når alle ledere er isoleret for den højeste spænding.' }),
+      fragment({ id: 'minimum-size', physicalPage: 273, provision: '524.1', text: 'Minimumstværsnit for kobberledere i faste effekt- og belysningskredse er 1,5 mm².' })
+    ], [{
+      id: 'S012',
+      question: 'Hvilket minimumstværsnit skal anvendes til en fast strømkreds med kobberledere?',
+      document: 'DS-HD 60364',
+      provision: '524.1',
+      physicalPage: 273,
+      answer: '1,5 mm².',
+      explanation: '',
+      keywords: 'fast installation, effekt, belysning, kobberleder, minimumstværsnit'
+    }])
+
+    expect(search.search('Må flere forskellige strømkredse fremføres i samme kobberkabel?')[0].provision).toBe('521.7')
+  })
+
   it.runIf(Boolean(storedIndexPath) && existsSync(storedIndexPath))('ranks 722.443.4 first in the complete local index', () => {
     const stored = JSON.parse(readFileSync(storedIndexPath, 'utf8')) as StoredIndex
     const results = new DocumentSearch(stored.fragments).search('SPD offentlig elbil lader')

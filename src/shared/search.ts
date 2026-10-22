@@ -92,10 +92,14 @@ function truthSimilarity(query: string, truth: TruthRecord): number {
   const truthKeys = new Set(semanticKeys(`${truth.question} ${truth.keywords}`))
   const matches = Array.from(queryKeys).filter((key) => truthKeys.has(key)).length
   if (matches < 2) return 0
+  const queryWords = new Set(queryTerms(query))
+  const truthWords = new Set(queryTerms(`${truth.question} ${truth.keywords}`))
+  const wordMatches = Array.from(queryWords).filter((word) => truthWords.has(word)).length
   const queryCoverage = matches / queryKeys.size
   const truthCoverage = matches / Math.min(truthKeys.size, Math.max(queryKeys.size, 1))
-  const score = 0.75 * queryCoverage + 0.25 * truthCoverage
-  return score >= 0.4 ? score : 0
+  const wordCoverage = wordMatches / queryWords.size
+  const score = 0.55 * queryCoverage + 0.2 * truthCoverage + 0.25 * wordCoverage
+  return score >= 0.55 ? score : 0
 }
 
 function normalizeDocument(value: string): string {
