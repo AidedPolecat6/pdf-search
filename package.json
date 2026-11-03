@@ -1,6 +1,6 @@
 {
   "name": "ok-pdf",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PDF Search - offline dokumentsøgning i danske lovtekster og standarder",
   "author": "AidedPolecat6",
   "license": "GPL-3.0-only",
@@ -12,6 +12,7 @@
     "dev": "electron-vite dev",
     "prebuild": "npm run prepare-assets",
     "build": "electron-vite build",
+    "build:private": "npm run prepare-assets && electron-vite build --mode private",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "package": "npm run build && electron-builder --win nsis",

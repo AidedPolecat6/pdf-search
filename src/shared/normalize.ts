@@ -17,7 +17,7 @@ export function normalizeText(value: string): string {
 }
 
 export function normalizeTerm(term: string): string | null {
-  const normalized = term.toLocaleLowerCase('da-DK').replace(/^\W+|\W+$/gu, '')
+  const normalized = term.toLocaleLowerCase('da-DK').replace(/^[^\p{L}\p{N}_]+|[^\p{L}\p{N}_]+$/gu, '')
   if (normalized.length < 2 || STOP_WORDS.has(normalized)) return null
   return normalized
 }
@@ -34,29 +34,41 @@ export function queryTerms(query: string): string[] {
 export interface ParsedQuery {
   unquoted: string
   phrases: string[]
+  boosted: string[]
   valid: boolean
 }
 
 export function parseQuery(query: string): ParsedQuery {
   const normalized = normalizeText(query).replace(/[“”]/g, '"')
   const phrases: string[] = []
+  const boosted: string[] = []
+  let boost = ''
+  let boosting = false
   let unquoted = ''
   let phrase = ''
   let quoted = false
 
   for (const character of normalized) {
-    if (character === '"') {
+    if (character === '*' && !quoted) {
+      if (boosting && boost.trim()) boosted.push(boost.trim())
+      boosting = !boosting
+      boost = ''
+      unquoted += ' '
+    } else if (character === '"') {
+      if (boosting) return { unquoted, phrases, boosted, valid: false }
       if (quoted && phrase.trim()) phrases.push(phrase.replace(/\s+/g, ' ').trim())
       quoted = !quoted
       phrase = ''
+      unquoted += ' '
     } else if (quoted) {
       phrase += character
     } else {
       unquoted += character
+      if (boosting) boost += character
     }
   }
 
-  return { unquoted: unquoted.replace(/\s+/g, ' ').trim(), phrases, valid: !quoted }
+  return { unquoted: unquoted.replace(/\s+/g, ' ').trim(), phrases, boosted, valid: !quoted && !boosting }
 }
 
 export function phraseText(value: string): string {

@@ -6,6 +6,7 @@ import { parseQuery } from '../../shared/normalize'
 import type { BenchmarkResult, IndexProgress, PdfFile, SearchResult, StoredIndex, TextSource, TruthSet } from '../../shared/types'
 
 interface ViewerState {
+  resultId: string
   path: string
   title: string
   page: number
@@ -39,7 +40,7 @@ function storedPaths(key: string): Set<string> {
 }
 
 function indexIsCurrent(index: StoredIndex | null, folder: string, files: PdfFile[]): boolean {
-  return Boolean(index && index.version === 2 && index.folder === folder && index.files.length === files.length &&
+  return Boolean(index && index.version === 4 && index.folder === folder && index.files.length === files.length &&
     files.every((file) => index.files.some((indexed) => indexed.path === file.path && indexed.sha256 === file.sha256)))
 }
 
@@ -105,13 +106,14 @@ export default function App(): React.JSX.Element {
   }, [documentMenu])
 
   async function benchmarkInSteps(engine: DocumentSearch, truthSet: TruthSet): Promise<void> {
-    let result: BenchmarkResult = { total: truthSet.records.length, top1: 0, top3: 0, failures: [] }
+    const questions = [...new Set(truthSet.records.map(record => record.question))]
+    let result: BenchmarkResult = { total: questions.length, top1: 0, top3: 0, failures: [] }
     setBenchmark(result)
-    for (let index = 0; index < truthSet.records.length; index += 1) {
-      setActivity({ message: 'Kontrollerer sandhedssæt', current: index + 1, total: truthSet.records.length })
-      const part = engine.benchmark([truthSet.records[index]])
+    for (let index = 0; index < questions.length; index += 1) {
+      setActivity({ message: 'Kontrollerer sandhedssæt', current: index + 1, total: questions.length })
+      const part = engine.benchmark(truthSet.records.filter(record => record.question === questions[index]))
       result = {
-        total: truthSet.records.length,
+        total: questions.length,
         top1: result.top1 + part.top1,
         top3: result.top3 + part.top3,
         failures: [...result.failures, ...part.failures]
@@ -160,6 +162,7 @@ export default function App(): React.JSX.Element {
     const engine = new DocumentSearch(next.fragments, truthSet.records, overview.entries)
     setSearch(engine)
     setResults([])
+    setHasSearched(false)
     await benchmarkInSteps(engine, truthSet)
     setActivity(null)
   }
@@ -201,7 +204,7 @@ export default function App(): React.JSX.Element {
     event.preventDefault()
     if (!search) return
     if (!parseQuery(query).valid) {
-      setQueryError('Luk citationstegnet for at søge efter en eksakt frase.')
+      setQueryError('Luk citationstegn og stjerner parvis. Brug "præcis frase" eller *vigtigt udtryk* uden at blande dem.')
       return
     }
     setQueryError(null)
@@ -240,6 +243,7 @@ export default function App(): React.JSX.Element {
   function openViewer(result: SearchResult, button: HTMLButtonElement): void {
     returnFocusRef.current = button
     setViewer({
+      resultId: result.id,
       path: result.documentPath,
       title: result.documentName,
       page: result.physicalPage,
@@ -254,7 +258,7 @@ export default function App(): React.JSX.Element {
     requestAnimationFrame(() => returnFocusRef.current?.focus())
   }
 
-  const indexedCount = index?.version === 2
+  const indexedCount = index?.version === 4
     ? index.files.filter((indexed) => files.some((file) => file.sha256 === indexed.sha256)).length
     : 0
   const enabledCount = files.length - files.filter((file) => disabledDocuments.has(file.path)).length
@@ -370,9 +374,11 @@ export default function App(): React.JSX.Element {
           <form className="search-form" onSubmit={submitSearch}>
             <input
               aria-label="Søgetekst"
+              aria-describedby="search-syntax"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value)
+                setHasSearched(false)
                 if (queryError) setQueryError(null)
               }}
               placeholder={'Fx SPD offentlig lader eller "transiente overspændinger"'}
@@ -380,6 +386,7 @@ export default function App(): React.JSX.Element {
             />
             <button className="search-button" disabled={!search || !query.trim() || isPending || enabledCount === 0}>Søg</button>
           </form>
+          <p id="search-syntax" className="search-syntax">Ekstra vægt: *16 A* eller *stikkontakt*. Præcist krav: "16 A".</p>
           {queryError && <div className="query-error">{queryError}</div>}
           {!search && !isIndexing && (
             <div className="empty-state">
@@ -388,12 +395,12 @@ export default function App(): React.JSX.Element {
             </div>
           )}
           {error && <div className="error-card">{error}</div>}
-          {search && results.length === 0 && query && !isPending && (
+          {search && hasSearched && results.length === 0 && query && !isPending && !activity && (
             <div className="no-results">{enabledCount ? 'Ingen resultater endnu. Prøv søgningen eller justér dine nøgleord.' : 'Vælg mindst ét dokument i biblioteket.'}</div>
           )}
           <div className="results-list">
             {results.map((result, position) => (
-              <article className="result-card" key={result.id}>
+              <article className={`result-card${viewer?.resultId === result.id ? ' result-card-active' : ''}`} key={result.id} aria-current={viewer?.resultId === result.id ? true : undefined}>
                 <div className="result-rank">{String(position + 1).padStart(2, '0')}</div>
                 <div className="result-content">
                   <h3>{result.documentName}</h3>

@@ -246,8 +246,8 @@ try {
     await delay(500)
     const result = await cdp(page.webSocketDebuggerUrl, 'Runtime.evaluate', {
       expression: `(() => {
-        const canvas = document.querySelector('.pdf-page-surface canvas');
-        const surface = document.querySelector('.pdf-page-surface');
+        const surface = document.querySelector('.pdf-page-surface:has(.pdf-highlight-box)');
+        const canvas = surface?.querySelector('canvas');
         const boxes = [...document.querySelectorAll('.pdf-highlight-box')];
         if (!canvas || !surface || !boxes.length) return null;
         const context = canvas.getContext('2d');

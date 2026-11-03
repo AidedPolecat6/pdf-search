@@ -11,6 +11,42 @@ const base = {
 }
 
 describe('segmentPage', () => {
+  it('keeps explicitly marked interleaved Danish and English page continuations separate', () => {
+    const danish = segmentPage({ ...base, text: '49 (da) DS/EN 60204-1:2018\n8.2.6 Danske krav til beskyttelsesledere' })
+    const english = segmentPage({ ...base, previousContext: danish.context,
+      text: '– 50 – IEC 60204-1:2016\nEnglish continuation\n9.1.1 Control circuit supply' })
+    expect(english.fragments[0].provision).toBe('Side uden identificeret bestemmelse')
+    const continued = segmentPage({ ...base, previousContext: english.context,
+      text: '50 (da) DS/EN 60204-1:2018\nFortsat beskyttelsesleder.\n8.3 Nye krav' })
+    expect(continued.fragments[0].provision).toBe('8.2.6 (fortsat)')
+    const nextEnglish = segmentPage({ ...base, previousContext: continued.context,
+      text: '– 51 – IEC 60204-1:2016\nContinued control circuit supply' })
+    expect(nextEnglish.fragments[0].provision).toBe('9.1.1 (fortsat)')
+  })
+
+  it('preserves a new subsection before the next section on a continuation page', () => {
+    const result = segmentPage({ ...base, previousContext: { section: '41', subsection: '3' },
+      text: 'Stk. 4. Kabler over jorden skal beskyttes.\n§ 42. Markeringsbånd skal være røde.' })
+    expect(result.fragments.map(item => item.provision)).toEqual(['§ 41, stk. 4', '§ 42, stk. 1'])
+    expect(result.fragments[0].text).toContain('Kabler over jorden')
+    expect(new Set(result.fragments.map(item => item.id)).size).toBe(result.fragments.length)
+  })
+
+  it('preserves table text before a new standard clause', () => {
+    const result = segmentPage({ ...base, previousContext: { standardClause: '712.443.102' },
+      text: 'Tabel 712.102 – Beregningsværdier\n35 115\n712.444.1 Næste bestemmelse' })
+    expect(result.fragments[0].text).toContain('35 115')
+    expect(result.fragments[0].provision).toBe('712.443.102 (fortsat)')
+    expect(result.fragments[1].provision).toBe('712.444.1')
+  })
+
+  it('updates subsection context even without a new section heading', () => {
+    const result = segmentPage({ ...base, previousContext: { section: '56', subsection: '1' },
+      text: 'Stk. 2. Andet stykke.\nStk. 4. Fjerde stykke.' })
+    expect(result.context.subsection).toBe('4')
+    expect(result.fragments.map(item => item.provision)).toEqual(['§ 56, stk. 2', '§ 56, stk. 4'])
+  })
+
   it('labels implicit stk. 1 and numbered items', () => {
     const result = segmentPage({
       ...base,

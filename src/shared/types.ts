@@ -22,7 +22,7 @@ export interface IndexedFragment {
 }
 
 export interface StoredIndex {
-  version: 2
+  version: 4
   folder: string
   createdAt: string
   files: PdfFile[]

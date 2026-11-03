@@ -52,6 +52,6 @@ describe('loadOverview', () => {
     const index = JSON.parse(readFileSync(storedIndexPath, 'utf8')) as StoredIndex
     const search = new DocumentSearch(index.fragments, truths.records, overview.entries)
 
-    expect(search.benchmark()).toMatchObject({ total: 15, top1: 15, top3: 15 })
+    expect(search.benchmark(truths.records.slice(0, 15))).toMatchObject({ total: 15, top1: 15, top3: 15 })
   }, 15_000)
 })

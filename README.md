@@ -32,7 +32,9 @@ Du kan skrive almindelige spørgsmål eller korte faglige søgeord:
 SPD offentlig elbil lader
 ```
 
-Programmet anvender faglige synonymer til at finde relevante formuleringer i dokumenterne.
+Programmet anvender faglige synonymer, afsnitsoverskrifter og vægtning af sjældnere matchende ord til at finde relevante formuleringer i dokumenterne. En udtrykkelig BEK/LBK-henvisning prioriterer det nævnte dokument.
+
+Publikationer med DS-sprogdeklarationen “på engelsk” udelukkes fra søgningen. I erklæret dansk/engelske publikationer medtages kun sider markeret `(da)`. Engelske IEC-sidehoveder og sider markeret “English Version” udelukkes også. Publikationer uden disse sprogmarkeringer kræver særskilt kontrol. Filteret gælder også, når alle dokumenter er valgt.
 
 Brug dobbelte citationstegn, når en bestemt frase skal forekomme i PDF-teksten:
 
@@ -75,7 +77,8 @@ PDF-fremviseren er altid synlig i højre side. Når intet dokument er åbent, vi
 
 Når du trykker **Åbn PDF**, åbnes hele dokumentet direkte på den relevante fysiske PDF-side. Søgeord og synonymer markeres uden at ændre originalfilen.
 
-- **Forrige/Næste:** skift fysisk PDF-side.
+- **Scroll:** rul sammenhængende op og ned gennem dokumentet. Sidetallet følger læsepositionen; kun synlige sider og nærmeste nabosider tegnes.
+- **Forrige/Næste:** spring til starten af den foregående/næste fysiske PDF-side.
 - **−/+**: juster zoom.
 - **Skjul markering/Vis markering:** slå markeringer til eller fra.
 - **M:** skift markeringer til eller fra med tastaturet.
@@ -91,7 +94,7 @@ Hvert resultat viser:
 - Matchsikkerhed
 - Om teksten kommer fra OCR
 
-Matchsikkerhed er en deterministisk lokal vurdering. Den sendes ikke til en ekstern tjeneste.
+Matchsikkerhed er en deterministisk lokal relevansscore, ikke en kalibreret sandsynlighed for et korrekt svar. Den sendes ikke til en ekstern tjeneste.
 
 ## Sandhedssættet
 
@@ -176,3 +179,14 @@ Repositoryet indeholder kildekode og ikon, men ingen PDF-dokumenter, sandhedssæ
 PDF Search er fri software under [GNU General Public License version 3](LICENSE), kun denne version (`GPL-3.0-only`). Copyright © 2026 AidedPolecat6.
 
 Tredjepartskomponenter beholder deres egne kompatible licenser. Se [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licensen omfatter ikke brugerens PDF-filer eller tredjepartsstandarder.
+## Prioriterede søgeudtryk
+
+Brug fx `byggeplads *16 A* stikkontakt` til at give hele udtrykket ekstra vægt. `*16 A*` og `*16A*` genkendes ens ved vægtningen. Resultater uden udtrykket kan stadig vises. Flere udtryk kan markeres, fx `*16 A* *stikkontakt*`. Stjerner skal afsluttes parvis og må ikke blandes med citationstegn inden i samme udtryk. Citationstegn, fx `"16 A"`, kræver fortsat et præcist match. Vægtningen ændrer rangeringen, ikke betydningen af matchprocenten som ukalibreret score.
+
+## Visuelle udgaver
+
+Standardbygningen (`npm run build`, `npm run package` og `npm run package:portable`) bruger det offentlige, lyse tema med grønt farveskema og bibliotek over søgning/PDF-visning. `npm run build:private` bygger det mørke tema. Begge bruger samme søgning, dataformat og funktioner; forskellen er kun præsentation.
+
+Version 0.1.1 opgraderer søgeindeksets format. Et ældre indeks genopbygges lokalt ved opstart; den første åbning efter opdatering kan derfor tage længere tid.
+
+Efter `build:private` kan den private portable udgave pakkes med `npx electron-builder --win portable --config.directories.output=dist/current --config.compression=normal`. Kør ikke `package:portable` bagefter, da den genbygger med det offentlige tema.

@@ -46,7 +46,7 @@ async function makeOcrWorker(onMessage: (message: string) => void): Promise<Work
 }
 
 function unchanged(previous: StoredIndex | null, file: PdfFile): boolean {
-  return previous?.version === 2 && (previous.files.some((candidate) => candidate.path === file.path && candidate.sha256 === file.sha256) ?? false)
+  return previous?.version === 4 && (previous.files.some((candidate) => candidate.path === file.path && candidate.sha256 === file.sha256) ?? false)
 }
 
 export async function buildIndex(
@@ -128,7 +128,7 @@ export async function buildIndex(
   }
 
   return {
-    version: 2,
+    version: 4,
     folder,
     createdAt: new Date().toISOString(),
     files,

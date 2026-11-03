@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import { GlobalWorkerOptions, getDocument, Util, type PDFDocumentProxy } from 'pdfjs-dist'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { GlobalWorkerOptions, getDocument, Util, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { containsVisibleInk, locateHighlight } from '../../shared/highlights'
-import type { TextSource } from '../../shared/types'
+import type { PdfTextPosition, TextSource } from '../../shared/types'
+import { layoutPages, pageAtOffset, visiblePageRange, type PageSize } from './pdfLayout'
 
 GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -24,12 +25,13 @@ interface HighlightBox {
   kind: 'query' | 'synonym' | 'provision'
 }
 
-interface PdfTextItem {
-  str: string
-  width: number
-  height: number
-  transform: number[]
-  fontName: string
+interface HighlightResult {
+  boxes: HighlightBox[]
+  items: number
+  selected: number
+  anchor: boolean
+  provision: boolean
+  hiddenFonts: string
 }
 
 function mergeLineBoxes(boxes: HighlightBox[]): HighlightBox[] {
@@ -76,48 +78,44 @@ function highlightStatus(kinds: HighlightBox['kind'][], source: TextSource): str
   return `${labels.slice(0, -1).join(', ')} og ${labels.at(-1)} markeret`
 }
 
-export function PdfViewer({ path, title, initialPage, provision, query, source, onClose }: PdfViewerProps): React.JSX.Element {
+function PdfPage({ pdf, page, zoom, query, provision, showHighlights, readText, onSize, onHighlights }: {
+  pdf: PDFDocumentProxy
+  page: number
+  zoom: number
+  query: string
+  provision: string
+  showHighlights: boolean
+  readText?: () => Promise<PdfTextPosition[]>
+  onSize: (page: number, size: PageSize) => void
+  onHighlights: (result: HighlightResult) => void
+}): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const stageRef = useRef<HTMLDivElement>(null)
-  const surfaceRef = useRef<HTMLDivElement>(null)
-  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
-  const [page, setPage] = useState(initialPage)
-  const [zoom, setZoom] = useState(1.2)
   const [error, setError] = useState<string | null>(null)
-  const [pageSize, setPageSize] = useState({ width: 0, height: 0 })
   const [highlights, setHighlights] = useState<HighlightBox[]>([])
-  const [highlightKinds, setHighlightKinds] = useState<HighlightBox['kind'][]>([])
-  const [showHighlights, setShowHighlights] = useState(true)
-  const [highlightDiagnostics, setHighlightDiagnostics] = useState({ items: 0, selected: 0, anchor: false, provision: false, hiddenFonts: '' })
-
-  useEffect(() => {
-    let active = true
-    void window.okPdf.readPdf(path)
-      .then((bytes) => getDocument({ data: bytes }).promise)
-      .then((document) => active ? setPdf(document) : document.cleanup())
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'PDF-filen kunne ikke åbnes.'))
-    return () => {
-      active = false
-    }
-  }, [path])
 
   useEffect(() => {
     if (!pdf || !canvasRef.current) return
     let cancelled = false
+    let renderTask: RenderTask | undefined
+    const canvas = canvasRef.current
     void pdf.getPage(page).then(async (pdfPage) => {
-      if (cancelled || !canvasRef.current) return
+      if (cancelled) return
+      try {
+      const natural = pdfPage.getViewport({ scale: 1 })
+      onSize(page, { width: natural.width, height: natural.height })
       const cssViewport = pdfPage.getViewport({ scale: zoom })
       const renderViewport = pdfPage.getViewport({ scale: zoom * window.devicePixelRatio })
-      const textItems = page === initialPage ? await window.okPdf.readPageText(path, page) : null
-      const canvas = canvasRef.current
+      const textItems = readText ? await readText() : null
+      if (cancelled) return
       const context = canvas.getContext('2d', { alpha: false })
       if (!context) return
       canvas.width = Math.ceil(renderViewport.width)
       canvas.height = Math.ceil(renderViewport.height)
       canvas.style.width = `${Math.ceil(cssViewport.width)}px`
       canvas.style.height = `${Math.ceil(cssViewport.height)}px`
-      setPageSize({ width: Math.ceil(cssViewport.width), height: Math.ceil(cssViewport.height) })
-      await pdfPage.render({ canvasContext: context, viewport: renderViewport, canvas }).promise
+      renderTask = pdfPage.render({ canvasContext: context, viewport: renderViewport, canvas })
+      await renderTask.promise
+      if (cancelled) return
 
       if (textItems) {
         const selection = locateHighlight(textItems, query, provision)
@@ -152,8 +150,8 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
           .filter((box) => boxContainsVisibleInk(context, canvas, box))
         if (!cancelled) {
           setHighlights(mergeLineBoxes(boxes))
-          setHighlightKinds(Array.from(new Set(boxes.map((box) => box.kind))))
-          setHighlightDiagnostics({
+          onHighlights({
+            boxes: mergeLineBoxes(boxes),
             items: textItems.length,
             selected: boxes.length,
             anchor: boxes.some((box) => box.kind === 'query'),
@@ -163,35 +161,146 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
         }
       } else if (!cancelled) {
         setHighlights([])
-        setHighlightKinds([])
       }
-      pdfPage.cleanup()
-    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Siden kunne ikke vises.'))
+      } finally {
+        pdfPage.cleanup()
+      }
+    }).catch((reason: unknown) => {
+      if (!cancelled) setError(reason instanceof Error ? reason.message : 'Siden kunne ikke vises.')
+    })
     return () => {
       cancelled = true
+      renderTask?.cancel()
     }
-  }, [pdf, page, zoom])
+  }, [pdf, page, zoom, query, provision, readText, onSize, onHighlights])
+
+  return <>
+    {error && <div className="error-card">Side {page}: {error}</div>}
+    <canvas ref={canvasRef} aria-label={`PDF-side ${page}`} />
+    {showHighlights && <div className="pdf-highlight-layer" aria-label={`Markering af ${provision}`}>
+      {highlights.map((box, index) => <span
+        className={`pdf-highlight-box pdf-highlight-${box.kind}`}
+        data-highlight-index={index}
+        key={`${box.left}-${box.top}-${index}`}
+        style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+      />)}
+    </div>}
+  </>
+}
+
+export function PdfViewer({ path, title, initialPage, provision, query, source, onClose }: PdfViewerProps): React.JSX.Element {
+  const stageRef = useRef<HTMLDivElement>(null)
+  const [document, setDocument] = useState<{ pdf: PDFDocumentProxy; size: PageSize } | null>(null)
+  const pdf = document?.pdf
+  const [page, setPage] = useState(initialPage)
+  const [zoom, setZoom] = useState(1.2)
+  const [error, setError] = useState<string | null>(null)
+  const [sizes, setSizes] = useState<Map<number, PageSize>>(() => new Map())
+  const measuredSizes = useRef(new Map<number, PageSize>())
+  const [range, setRange] = useState<[number, number]>([0, 0])
+  const [showHighlights, setShowHighlights] = useState(true)
+  const [highlightDiagnostics, setHighlightDiagnostics] = useState<HighlightResult>({ boxes: [], items: 0, selected: 0, anchor: false, provision: false, hiddenFonts: '' })
+  const highlights = highlightDiagnostics.boxes
+  const highlightKinds = Array.from(new Set(highlights.map(box => box.kind)))
+  const pages = useMemo(() => document ? layoutPages(document.pdf.numPages, document.size, sizes, zoom) : [], [document, sizes, zoom])
+  const pagesRef = useRef(pages)
+  const pendingPosition = useRef<{ index: number; fraction: number } | null>({ index: Math.max(0, initialPage - 1), fraction: 0 })
+  const initialHighlightPending = useRef(true)
+  const textPromise = useRef<Promise<PdfTextPosition[]> | null>(null)
+  const readText = useCallback(() => textPromise.current ??= window.okPdf.readPageText(path, initialPage), [path, initialPage])
+  const onHighlights = useCallback((result: HighlightResult) => setHighlightDiagnostics(result), [])
 
   useEffect(() => {
-    if (!showHighlights || !highlights.length || !stageRef.current || !surfaceRef.current) return
-    const stage = stageRef.current
-    const surface = surfaceRef.current
-    const first = highlights.find((highlight) => highlight.kind === 'provision') ?? highlights[0]
-    requestAnimationFrame(() => {
-      stage.scrollTo({
-        top: Math.max(0, surface.offsetTop + first.top - stage.clientHeight * 0.3),
-        left: Math.max(0, surface.offsetLeft + first.left - stage.clientWidth * 0.3),
-        behavior: 'smooth'
-      })
+    let active = true
+    let loading: ReturnType<typeof getDocument> | undefined
+    void (async () => {
+      const bytes = await window.okPdf.readPdf(path)
+      if (!active) return
+      loading = getDocument({ data: bytes })
+      const pdf = await loading.promise
+      const first = await pdf.getPage(Math.max(1, Math.min(pdf.numPages, initialPage)))
+      const viewport = first.getViewport({ scale: 1 })
+      if (active) setDocument({ pdf, size: { width: viewport.width, height: viewport.height } })
+    })().catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : 'PDF-filen kunne ikke åbnes.')
     })
-  }, [highlights, showHighlights])
+    return () => { active = false; void loading?.destroy() }
+  }, [path, initialPage])
 
-  useEffect(() => () => {
-    void pdf?.cleanup()
-  }, [pdf])
+  const updateViewport = useCallback(() => {
+    const stage = stageRef.current
+    const layout = pagesRef.current
+    if (!stage || !layout.length) return
+    const top = Math.max(0, stage.scrollTop - 34)
+    setPage(pageAtOffset(layout, top + Math.min(200, stage.clientHeight / 3)) + 1)
+    const next = visiblePageRange(layout, top, stage.clientHeight)
+    setRange(old => old[0] === next[0] && old[1] === next[1] ? old : next)
+  }, [])
+
+  const rememberPosition = useCallback(() => {
+    const stage = stageRef.current
+    const layout = pagesRef.current
+    if (!stage || !layout.length || pendingPosition.current) return
+    const top = Math.max(0, stage.scrollTop - 34)
+    const index = pageAtOffset(layout, top)
+    pendingPosition.current = { index, fraction: (top - layout[index].top) / layout[index].height }
+  }, [])
+
+  const onSize = useCallback((number: number, size: PageSize) => {
+    const existing = measuredSizes.current.get(number)
+    if (existing?.width === size.width && existing.height === size.height) return
+    rememberPosition()
+    measuredSizes.current = new Map(measuredSizes.current).set(number, size)
+    setSizes(measuredSizes.current)
+  }, [rememberPosition])
+
+  useLayoutEffect(() => {
+    pagesRef.current = pages
+    const stage = stageRef.current
+    if (!stage || !pages.length) return
+    const position = pendingPosition.current
+    if (position) {
+      const target = pages[Math.min(position.index, pages.length - 1)]
+      stage.scrollTop = 34 + target.top + target.height * position.fraction
+      pendingPosition.current = null
+    }
+    if (initialHighlightPending.current && highlights.length) {
+      const first = highlights.find(box => box.kind === 'provision') ?? highlights[0]
+      stage.scrollTop = Math.max(0, 34 + pages[Math.max(0, Math.min(initialPage - 1, pages.length - 1))].top + first.top - stage.clientHeight * 0.3)
+      initialHighlightPending.current = false
+    }
+    updateViewport()
+  }, [pages, highlights, initialPage, updateViewport])
+
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const observer = new ResizeObserver(updateViewport)
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [updateViewport])
+
+  const navigate = (number: number): void => {
+    const target = pages[number - 1]
+    if (!target || !stageRef.current) return
+    initialHighlightPending.current = false
+    pendingPosition.current = null
+    stageRef.current.scrollTop = 34 + target.top
+    updateViewport()
+  }
+
+  const changeZoom = (change: number): void => {
+    const next = Math.min(2.4, Math.max(0.6, zoom + change))
+    if (next === zoom) return
+    rememberPosition()
+    setZoom(next)
+  }
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target
+      if (event.defaultPrevented || event.isComposing || (target instanceof HTMLElement
+        && (target.isContentEditable || target.closest('input, textarea, select')))) return
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
@@ -225,10 +334,7 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
           </div>
         )}
         <div className="viewer-controls">
-          <div className="viewer-control-group viewer-page-controls">
-            <button disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Forrige</button>
-            <button disabled={!pdf || page >= pdf.numPages} onClick={() => setPage((value) => value + 1)}>Næste</button>
-          </div>
+          <div className="viewer-highlight-controls">
           {Boolean(highlights.length) && (
             <>
               <div className="highlight-legend" aria-label="Markeringsfarver">
@@ -247,29 +353,36 @@ export function PdfViewer({ path, title, initialPage, provision, query, source, 
               </button>
             </>
           )}
+          </div>
+          <div className="viewer-control-group viewer-page-controls">
+            <button disabled={!pdf || page <= 1} onClick={() => navigate(page - 1)}>Forrige</button>
+            <button disabled={!pdf || page >= pdf.numPages} onClick={() => navigate(page + 1)}>Næste</button>
+          </div>
           <div className="viewer-control-group viewer-zoom-controls">
-            <button onClick={() => setZoom((value) => Math.max(0.6, value - 0.15))}>−</button>
+            <button onClick={() => changeZoom(-0.15)}>−</button>
             <span>{Math.round(zoom * 100)} %</span>
-            <button onClick={() => setZoom((value) => Math.min(2.4, value + 0.15))}>+</button>
+            <button onClick={() => changeZoom(0.15)}>+</button>
           </div>
         </div>
       </header>
-      <div className="viewer-stage" ref={stageRef}>
-        {error ? <div className="error-card">{error}</div> : (
-          <div className="pdf-page-surface" ref={surfaceRef} style={{ width: pageSize.width, height: pageSize.height }}>
-            <canvas ref={canvasRef} />
-            {showHighlights && (
-              <div className="pdf-highlight-layer" aria-label={`Markering af ${provision}`}>
-                {highlights.map((box, index) => (
-                  <span
-                    className={`pdf-highlight-box pdf-highlight-${box.kind}`}
-                    data-highlight-index={index}
-                    key={`${box.left}-${box.top}-${index}`}
-                    style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
-                  />
-                ))}
+      <div className="viewer-stage" ref={stageRef} onScroll={updateViewport}
+        onWheel={() => { initialHighlightPending.current = false }}
+        onPointerDown={() => { initialHighlightPending.current = false }}
+        onKeyDown={event => {
+          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) initialHighlightPending.current = false
+        }}
+        tabIndex={0} aria-label="PDF-sider – rul op eller ned">
+        {error ? <div className="error-card">{error}</div> : !pdf ? <p role="status">Åbner PDF…</p> : (
+          <div className="pdf-pages" style={{ height: (pages.at(-1)?.top ?? 0) + (pages.at(-1)?.height ?? 0), width: Math.max(...pages.map(item => item.width)) }}>
+            {pages.slice(range[0], range[1]).map((item, index) => {
+              const number = range[0] + index + 1
+              return <div key={number} className="pdf-page-surface" data-page-number={number}
+                style={{ top: item.top, width: item.width, height: item.height }}>
+                <PdfPage key={`${number}:${zoom}`} pdf={pdf} page={number} zoom={zoom} query={query} provision={provision}
+                  readText={number === initialPage ? readText : undefined} showHighlights={showHighlights}
+                  onSize={onSize} onHighlights={onHighlights} />
               </div>
-            )}
+            })}
           </div>
         )}
       </div>

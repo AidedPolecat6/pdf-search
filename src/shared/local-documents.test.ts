@@ -39,6 +39,9 @@ describe('det lokale dokumentbibliotek', () => {
       fragments.push(...segmented.fragments)
     }
 
+    expect(fragments.some(fragment => fragment.provision === '§ 41, stk. 4' && fragment.physicalPage === 8)).toBe(true)
+    expect(fragments.some(fragment => fragment.provision.startsWith('§ 56, stk. 4') && fragment.physicalPage === 10)).toBe(true)
+
     const results = new DocumentSearch(fragments).search(
       'Hvad er kravet til mærkestrømmen for den foransiddende kortslutningsbeskyttelse for en husholdningsstikkontakt med en mærkestrøm på 10 A?'
     )

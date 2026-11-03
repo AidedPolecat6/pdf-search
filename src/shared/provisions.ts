@@ -1,10 +1,14 @@
 import type { IndexedFragment, TextSource } from './types'
 import { normalizeText } from './normalize'
 
-interface SegmentContext {
+interface ProvisionContext {
   section?: string
   subsection?: string
   standardClause?: string
+}
+
+interface SegmentContext extends ProvisionContext {
+  languageContexts?: Partial<Record<'da' | 'en', ProvisionContext>>
 }
 
 interface SegmentInput {
@@ -34,17 +38,17 @@ function splitAtMatches(text: string, regex: RegExp): Array<{ marker: RegExpExec
   }))
 }
 
-function lawFragments(section: string, body: string): Array<{ provision: string; text: string; confidence: number }> {
+function lawFragments(section: string, body: string, initialSubsection = '1'): Array<{ provision: string; text: string; confidence: number }> {
   const subsectionMatches = Array.from(body.matchAll(/^\s*Stk\.\s*(\d+)\.?\s*/gimu))
   const subsectionParts = subsectionMatches.length
     ? [
-        { number: '1', body: body.slice(0, subsectionMatches[0].index) },
+        { number: initialSubsection, body: body.slice(0, subsectionMatches[0].index) },
         ...subsectionMatches.map((match, index) => ({
           number: match[1],
           body: body.slice(match.index, subsectionMatches[index + 1]?.index ?? body.length)
         }))
       ]
-    : [{ number: '1', body }]
+    : [{ number: initialSubsection, body }]
 
   const output: Array<{ provision: string; text: string; confidence: number }> = []
   for (const subsection of subsectionParts) {
@@ -73,7 +77,7 @@ function lawFragments(section: string, body: string): Array<{ provision: string;
   return output
 }
 
-export function segmentPage(input: SegmentInput): SegmentedPage {
+function segmentPageContent(input: SegmentInput): SegmentedPage {
   const text = normalizeText(input.text)
   const lawSections = splitAtMatches(text, LAW_SECTION)
   const fragments: IndexedFragment[] = []
@@ -96,8 +100,23 @@ export function segmentPage(input: SegmentInput): SegmentedPage {
     })
   }
 
+  const preserveContinuation = (prefix: string): void => {
+    if (!prefix.trim()) return
+    if (context.section) {
+      for (const fragment of lawFragments(context.section, prefix, context.subsection)) {
+        push(fragment.provision, fragment.text, fragment.confidence, fragments.length)
+      }
+      const subsections = Array.from(prefix.matchAll(/^\s*Stk\.\s*(\d+)\.?\s*/gimu))
+      context.subsection = subsections.at(-1)?.[1] ?? context.subsection
+    } else {
+      push(context.standardClause ? `${context.standardClause} (fortsat)` : 'Side uden identificeret bestemmelse',
+        prefix, context.standardClause ? 0.7 : 0.25, fragments.length)
+    }
+  }
+
   if (lawSections.length) {
-    let index = 0
+    preserveContinuation(text.slice(0, lawSections[0].marker.index))
+    let index = fragments.length
     for (const part of lawSections) {
       const section = part.marker[1]
       const subsections = Array.from(part.body.matchAll(/^\s*Stk\.\s*(\d+)\.?\s*/gimu))
@@ -111,10 +130,16 @@ export function segmentPage(input: SegmentInput): SegmentedPage {
 
   const standardSections = splitAtMatches(text, STANDARD_CLAUSE)
   if (standardSections.length) {
-    standardSections.forEach((part, index) => {
+    preserveContinuation(text.slice(0, standardSections[0].marker.index))
+    standardSections.forEach((part) => {
       context = { standardClause: part.marker[1] }
-      push(part.marker[1], part.body, 0.9, index)
+      push(part.marker[1], part.body, 0.9, fragments.length)
     })
+    return { fragments, context }
+  }
+
+  if (context.section && /^\s*Stk\.\s*\d+/imu.test(text)) {
+    preserveContinuation(text)
     return { fragments, context }
   }
 
@@ -125,4 +150,22 @@ export function segmentPage(input: SegmentInput): SegmentedPage {
       : 'Side uden identificeret bestemmelse'
   push(inherited, text, context.section || context.standardClause ? 0.7 : 0.25, 0)
   return { fragments, context }
+}
+
+export function segmentPage(input: SegmentInput): SegmentedPage {
+  const header = input.text.trimStart().split('\n')[0]
+  const language = /^\d+\s*\(da\)\s+DS\//.test(header) ? 'da'
+    : /^[–−-]\s*\d+\s*[–−-]\s*IEC\s+\d/.test(header) ? 'en' : null
+  const previous = input.previousContext
+  const result = segmentPageContent({ ...input,
+    previousContext: language ? previous?.languageContexts?.[language] : previous })
+  if (language || previous?.languageContexts) {
+    const languageContexts = { ...previous?.languageContexts }
+    if (language) languageContexts[language] = {
+      section: result.context.section, subsection: result.context.subsection,
+      standardClause: result.context.standardClause
+    }
+    result.context = { ...result.context, languageContexts }
+  }
+  return result
 }
