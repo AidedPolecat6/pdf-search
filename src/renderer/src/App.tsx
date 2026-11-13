@@ -57,6 +57,7 @@ export default function App(): React.JSX.Element {
   const [isIndexing, setIsIndexing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
+  const [copiedResult, setCopiedResult] = useState<string | null>(null)
   const [truths, setTruths] = useState<TruthSet>({ sourcePath: null, records: [], warnings: [] })
   const [benchmark, setBenchmark] = useState<BenchmarkResult>({ total: 0, top1: 0, top3: 0, failures: [] })
   const [disabledDocuments, setDisabledDocuments] = useState<Set<string>>(() => storedPaths(DISABLED_DOCUMENTS_KEY))
@@ -68,6 +69,12 @@ export default function App(): React.JSX.Element {
   const [isPending, startTransition] = useTransition()
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const startedRef = useRef(false)
+
+  useEffect(() => {
+    if (!copiedResult) return
+    const timer = window.setTimeout(() => setCopiedResult(null), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copiedResult])
 
   useEffect(() => {
     if (startedRef.current) return
@@ -253,6 +260,16 @@ export default function App(): React.JSX.Element {
     })
   }
 
+  async function copyResult(result: SearchResult): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(`${result.documentName} – ${result.provision}`)
+      setCopiedResult(result.id)
+    } catch {
+      setCopiedResult(null)
+      setError('Kilden kunne ikke kopieres til udklipsholderen. Prøv igen.')
+    }
+  }
+
   function closeViewer(): void {
     setViewer(null)
     requestAnimationFrame(() => returnFocusRef.current?.focus())
@@ -413,9 +430,14 @@ export default function App(): React.JSX.Element {
                 <div className="confidence" aria-label={`Matchsikkerhed ${result.confidence} procent`}>
                   <strong>{result.confidence}%</strong><span>matchsikkerhed</span>
                 </div>
-                <button className="open-button" onClick={(event) => openViewer(result, event.currentTarget)}>
-                  Åbn PDF
-                </button>
+                <div className="result-actions">
+                  <button className="open-button" onClick={(event) => openViewer(result, event.currentTarget)}>
+                    Åbn PDF
+                  </button>
+                  <button className="secondary-button copy-button" onClick={() => void copyResult(result)} title="Kopiér kilde og bestemmelse" aria-live="polite">
+                    {copiedResult === result.id ? 'Kopieret' : 'Kopier'}
+                  </button>
+                </div>
               </article>
             ))}
           </div>
