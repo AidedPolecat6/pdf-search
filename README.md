@@ -185,7 +185,7 @@ Brug fx `byggeplads *16 A* stikkontakt` til at give hele udtrykket ekstra vægt.
 
 ## Visuelle udgaver
 
-Standardbygningen (`npm run build`, `npm run package` og `npm run package:portable`) bruger det offentlige, lyse tema med grønt farveskema og bibliotek over søgning/PDF-visning. `npm run build:private` bygger det mørke tema. Begge bruger samme søgning, dataformat og funktioner; forskellen er kun præsentation.
+Standardbygningen (`npm run build`, `npm run package` og `npm run package:portable`) bruger det offentlige, lyse tema med grønt farveskema. På brede skærme står et kompakt, scrollbart bibliotek over søgningen til venstre, mens PDF-visningen får højre side i fuld arbejdshøjde. På smalle skærme stables panelerne. `npm run build:private` bygger det mørke tema. Begge bruger samme søgning, dataformat og funktioner; forskellen er kun præsentation.
 
 Version 0.1.1 opgraderer søgeindeksets format. Et ældre indeks genopbygges lokalt ved opstart; den første åbning efter opdatering kan derfor tage længere tid.
 
